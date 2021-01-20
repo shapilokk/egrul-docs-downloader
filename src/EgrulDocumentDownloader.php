@@ -1,5 +1,9 @@
 <?php
 
+namespace Egrul;
+
+use Exception;
+
 /**
  * Класс для скачивания документов с сайта EGRUL.NALOG.RU
  *
@@ -53,11 +57,12 @@ class EgrulDocumentDownloader
      * @param bool $returnHeaders
      * @return false|resource
      * @throws Exception
+     * @throws Exception
      */
     private function curlReq(string $url, string $method = 'POST', array $params = array(), bool $returnHeaders = true)
     {
         if(empty($url)) {
-            throw new \Exception('Пустой url запроса.');
+            throw new Exception('Пустой url запроса.');
         }
 
         $request_headers = array(
@@ -67,7 +72,7 @@ class EgrulDocumentDownloader
 
         $ch = curl_init($url);
         if(!$ch) {
-            throw new \Exception('Не подключен модуль CURL для PHP.');
+            throw new Exception('Не подключен модуль CURL для PHP.');
         }
 
         if(!empty($this->cookie)) {
@@ -90,7 +95,7 @@ class EgrulDocumentDownloader
 
         $result = curl_exec($ch);
         if ($result === false) {
-            throw new \Exception('Не удалось осуществить запрос на: ' . $url . '.');
+            throw new Exception('Не удалось осуществить запрос на: ' . $url . '.');
         }
 
         curl_close($ch);
@@ -118,16 +123,18 @@ class EgrulDocumentDownloader
         if (preg_match($pattern, $headers, $result)) {
             $this->cookie = explode('; ', $result[1])[0];
         } else {
-            throw new \Exception('Не удалось извлечь куки файлы из запроса');
+            throw new Exception('Не удалось извлечь куки файлы из запроса');
         }
     }
 
     private function getParams()
     {
-        return array(
+        $params = array(
             'r' => round(microtime(true) * 1000),
             '_' => round(microtime(true) * 1000)
         );
+
+        return http_build_query($params);
     }
 
     /**
@@ -138,35 +145,42 @@ class EgrulDocumentDownloader
     private function searchDocumentRequest()
     {
 
-        $queryString = http_build_query($this->getParams());
-
-        $response = $this->curlReq('https://egrul.nalog.ru/search-result/' . $this->t . '?' . $queryString , 'GET', array(), false);
-
+        $params = $this->getParams();
+        $response = $this->curlReq('https://egrul.nalog.ru/search-result/' . $this->t . '?' . $params , 'GET', array(), false);
         $parse = json_decode($response, 1);
-
         $this->t = $parse['rows'][0]['t'];
     }
 
     private function vypDocumentRequest()
     {
-        $url = 'https://egrul.nalog.ru/vyp-request/' . $this->t . '?' . http_build_query($this->getParams());
-
+        $url = 'https://egrul.nalog.ru/vyp-request/' . $this->t . '?' . $this->getParams();
         $req = $this->curlReq($url, 'GET', array(), false);
-
         $decode = json_decode($req, 1);
+
         if ($decode['captchaRequired']) {
-            throw new \Exception('Сервис временно недоступен.');
+            throw new Exception('Сервис временно недоступен.');
         }
 
         $this->t = $decode['t'];
     }
 
+    /**
+     * Первичный запрос на сайт
+     * Сохраняет полученные куки
+     *
+     * @throws Exception
+     */
     private function requestSavedCookie()
     {
         $request = $this->curlReq("https://egrul.nalog.ru/index.html", 'GET', array(), true);
         $this->parseCookieInHeaders($request);
     }
 
+    /**
+     *
+     *
+     * @throws Exception
+     */
     private function prepareDocumentRequest()
     {
         $postData = array(
@@ -180,38 +194,50 @@ class EgrulDocumentDownloader
 
         $decode = json_decode($request, 1);
         if($decode['captchaRequired']) {
-            throw new \Exception('Сервис временно недоступен для скачивания документов.');
+            throw new Exception('Сервис временно недоступен для скачивания документов.');
         }
 
         $this->t = $decode['t'];
     }
 
+    /**
+     * Проверяет статус готовности сервера
+     * Для скачивания документа
+     *
+     * @return mixed
+     * @throws Exception
+     */
     private function statusLoadDocumentRequest()
     {
-        $url = 'https://egrul.nalog.ru/vyp-status/' . $this->t . '?' . http_build_query($this->getParams());
-
+        $url = 'https://egrul.nalog.ru/vyp-status/' . $this->t . '?' . $this->getParams();
         $request = $this->curlReq($url, 'GET', array(), false);
-
         $parse = json_decode($request, 1);
         return $parse['status'];
     }
 
+    /**
+     * Выполняет запрос на скачивание документа
+     *
+     * @throws Exception
+     */
     private function downloadDocumentRequest()
     {
         $url = 'https://egrul.nalog.ru/vyp-download/' . $this->t;
         $this->doc = $this->curlReq($url, 'GET', array(), false);
     }
 
+    /**
+     * Функция - агрегатор всех запросов
+     *
+     * @throws Exception
+     */
     private function start()
     {
         $this->prepareDocumentRequest();
-
         $this->searchDocumentRequest();
-
         $this->vypDocumentRequest();
 
-        $status = $this->statusLoadDocumentRequest();
-        if($status === 'ready') {
+        if($this->statusLoadDocumentRequest() === 'ready') {
             $this->downloadDocumentRequest();
         }
     }
@@ -220,6 +246,7 @@ class EgrulDocumentDownloader
      * Возвращает булево значение, готов ли документ
      *
      * @return bool
+     * @throws Exception
      */
     public function ready()
     {
@@ -228,18 +255,13 @@ class EgrulDocumentDownloader
         return isset($this->doc);
     }
 
+    /**
+     * Возвращает загруженный документ
+     *
+     * @return mixed
+     */
     public function getDocument()
     {
         return $this->doc;
     }
-}
-
-try {
-    $doc = new EgrulDocumentDownloader('1037700258694');
-    if($doc->ready()) {
-        $document = $doc->getDocument(); // Биннарник pdf документа
-         file_put_contents('doc.pdf', $document);
-    }
-} catch (Exception $e) {
-    exit($e);
 }
