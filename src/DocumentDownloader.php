@@ -138,9 +138,16 @@ class DocumentDownloader
         $this->searchDocumentRequest();
 
         $this->vypDocumentRequest();
+        
+        $attempts = 10;
+        $interval = 1;
 
-        if($this->statusLoadDocumentRequest() === 'ready') {
-            $this->downloadDocumentRequest();
+        for ($i=0; $i <= $attempts; $i++) {
+            if($this->statusLoadDocumentRequest() === 'ready') {
+                $this->downloadDocumentRequest();
+                break;
+            }
+            sleep($interval);
         }
     }
 
